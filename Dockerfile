@@ -21,6 +21,12 @@ RUN groupadd --system --gid 1000 middleware \
 
 WORKDIR /app
 
+# Unbuffered stdout: Python buffers when stdout is not a TTY, which would hold
+# structured log lines in memory instead of surfacing them in
+# `docker compose logs` — the one place they are read during local use.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 COPY --from=builder /install /usr/local
 
 # Only what the running service needs: the application package and the
