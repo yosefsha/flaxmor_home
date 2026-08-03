@@ -20,6 +20,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+from app.request_logging import attach_completion_fields
+
 logger = logging.getLogger(__name__)
 
 _DONE_SENTINEL = "[DONE]"
@@ -93,17 +95,27 @@ class SseStreamObserver:
             detail = str(exc) or exc.__class__.__name__
             self.observations.interrupted = True
             self.observations.interruption_detail = detail
-            logger.warning("upstream stream interrupted mid-response: %s", detail)
+            logger.warning(
+                "upstream stream interrupted mid-response: %s",
+                detail,
+                extra={"event": "upstream.stream_interrupted"},
+            )
             yield synthetic_error_frame(detail)
             yield _DONE_FRAME
         finally:
+            observed = {
+                "finish_reason": self.observations.finish_reason,
+                "usage": self.observations.usage,
+                "interrupted": self.observations.interrupted,
+            }
+            # Also attach to this request's `request.completed`, so the
+            # lifecycle event carries the outcome rather than requiring a
+            # reader to join two lines by request id. A no-op outside a
+            # request, so this stays usable in isolation.
+            attach_completion_fields(**observed)
             logger.info(
-                "upstream.stream_completed",
-                extra={
-                    "finish_reason": self.observations.finish_reason,
-                    "usage": self.observations.usage,
-                    "interrupted": self.observations.interrupted,
-                },
+                "upstream stream completed",
+                extra={"event": "upstream.stream_completed", **observed},
             )
 
     def _observe_frame(self, frame: str) -> None:

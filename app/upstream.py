@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 from collections.abc import AsyncIterator
@@ -23,7 +24,7 @@ import httpx
 from app.config import Settings
 from app.errors import UpstreamError
 from app.ports import ProbeResult, PromptSource
-from app.request_logging import log_message_content
+from app.request_logging import attach_completion_fields, log_message_content
 from app.streaming import SseStreamObserver
 
 logger = logging.getLogger(__name__)
@@ -60,9 +61,14 @@ def _parse_retry_after(header_value: str | None) -> float | None:
         return None
     header_value = header_value.strip()
     try:
-        return max(float(header_value), 0.0)
+        seconds = float(header_value)
     except ValueError:
         pass
+    else:
+        # ``float`` accepts "inf" and "nan". Either would survive to
+        # ``int(retry_after)`` in the error handler and raise there, turning a
+        # 429 the caller could act on into an opaque 500.
+        return max(seconds, 0.0) if math.isfinite(seconds) else None
     try:
         target = parsedate_to_datetime(header_value)
     except (TypeError, ValueError, IndexError):
@@ -149,6 +155,7 @@ class OpenAiUpstreamClient:
                 "discarded %d client system message(s); the Middleware's System "
                 "Prompt is the only system instruction sent upstream",
                 len(client_system_messages),
+                extra={"event": "upstream.client_system_message_discarded"},
             )
 
         prepared["messages"] = [
@@ -163,6 +170,7 @@ class OpenAiUpstreamClient:
             logger.warning(
                 "client temperature %.2f threatens Extraction Block format compliance",
                 temperature,
+                extra={"event": "upstream.risky_temperature"},
             )
 
         max_tokens = prepared.get("max_tokens")
@@ -172,21 +180,31 @@ class OpenAiUpstreamClient:
             logger.warning(
                 "client max_tokens %d risks truncating the Extraction Block",
                 max_tokens,
+                extra={"event": "upstream.risky_max_tokens"},
             )
 
         prepared["stream"] = streaming
         if streaming:
             prepared["stream_options"] = {"include_usage": True}
 
+        # Which model was called and how many messages it was given are
+        # operational facts, not user content, so they belong on the lifecycle
+        # event and must not be hidden behind LOG_PROMPTS -- an operator
+        # debugging a bad extraction needs them at the default settings.
+        attach_completion_fields(
+            model=prepared.get("model"),
+            message_count=len(prepared["messages"]),
+        )
+
         # The only place the fully-assembled payload exists: the injected
-        # System Prompt alongside the user's document, exactly as the Upstream
-        # will see it. That is the view worth having when iterating on the
-        # prompt, so it is the call site for content logging -- gated inside
-        # ``log_message_content`` by ``LOG_PROMPTS``, which is false by default.
+        # System Prompt alongside the user's document, as it is about to be
+        # sent. Logged here rather than after a successful send, because a
+        # request that failed to go out is exactly when its contents are worth
+        # having -- so read this as "attempted", not "delivered".
         log_message_content(
             logger,
             "upstream.request_payload",
-            "outgoing upstream payload",
+            "upstream payload assembled",
             settings=self._settings,
             model=prepared.get("model"),
             messages=prepared["messages"],
@@ -215,7 +233,10 @@ class OpenAiUpstreamClient:
             except _RETRYABLE_CONNECT_EXCEPTIONS as exc:
                 last_exc = exc
                 logger.warning(
-                    "upstream connection failed on attempt %d: %s", attempt, exc
+                    "upstream connection failed on attempt %d: %s",
+                    attempt,
+                    exc,
+                    extra={"event": "upstream.connection_failed", "attempt": attempt},
                 )
                 continue
             if response.status_code >= 500 and attempt == 1:
@@ -223,6 +244,11 @@ class OpenAiUpstreamClient:
                     "upstream returned %d on attempt %d, retrying once",
                     response.status_code,
                     attempt,
+                    extra={
+                        "event": "upstream.retrying",
+                        "status_code": response.status_code,
+                        "attempt": attempt,
+                    },
                 )
                 await response.aclose()
                 continue
