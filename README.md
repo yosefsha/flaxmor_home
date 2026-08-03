@@ -117,12 +117,32 @@ prose, not JSON.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m pytest
-# 103 passed
+# 103 passed, 38 deselected
 ```
 
-The suite is entirely offline: no API key, no network, no containers. The upstream is faked
-via `httpx.MockTransport`, and SSE fixtures cover split frames, the `[DONE]` sentinel and a
-mid-stream disconnection.
+The default suite is entirely offline: no API key, no network, no containers. The upstream
+is faked via `httpx.MockTransport`, and SSE fixtures cover split frames, the `[DONE]`
+sentinel and a mid-stream disconnection.
+
+### Live prompt evaluations
+
+A second suite exercises the system prompt against the real model. It is deselected by
+default and skips when no key is present, so a clean checkout still reports green.
+
+```bash
+.venv/bin/python -m pytest -m live
+# 38 passed in ~45s
+```
+
+It sends the eight documents in `examples/` and asserts structure on all of them — exactly
+one ```` ```json ```` block, nothing outside the fence, the four envelope keys, confidences
+in range, every flagged field carrying a path and a real reason — plus exact extracted
+values on the unambiguous receipt, both Mode Selection edge cases, prose-only follow-ups,
+and that an illegible value is never reported as a confident number.
+
+It costs roughly a dozen requests against `gpt-4o-mini` per run, a fraction of a cent. It
+found two real prompt defects; both are written up in
+[SYSTEM_PROMPT.md](SYSTEM_PROMPT.md).
 
 ## Logs
 
@@ -199,13 +219,13 @@ degrades quietly into a transcriber, behind a clean-looking envelope. The prompt
 explicit rule — expand, preserve, or flag — and the third option matters most: not
 understanding a token is exactly the condition `uncertain_fields` exists to report.
 
-**2. Live prompt evaluations are specified but not built.** `SYSTEM_PROMPT.md` lists four
-behaviours as predicted-not-observed: Mode Selection on a terse paste, Follow-up Mode
-staying prose rather than re-emitting a block, format holding on a long document near the
-token limit, and whether the stated `0.9` threshold actually makes flagging consistent
-between runs. The intended shape is a `pytest -m live` suite over `examples/`, asserting
-structure on every document and exact values on the unambiguous ones, skipping when no key
-is present. One manual run against one model on one document is evidence, not coverage.
+**2. The live evals cover one model and no long documents.** `pytest -m live` now exercises
+the prompt over `examples/`, and it earned its keep — it caught the language tag being
+dropped on a quarter of the documents. Two gaps remain. Every fixture is short, so
+truncation near `DEFAULT_MAX_TOKENS` is untested, and that is the failure this design
+worries about most: a JSON object cut off mid-structure is unusable in a way truncated
+prose is not. And everything observed so far is `gpt-4o-mini` at `temperature: 0` — the
+prompt has never run against another model, so its portability is unknown.
 
 **3. `/v1/models` could proxy OpenAI's real catalogue.** It currently returns a single
 configured id, which keeps the model dropdown working when OpenAI is unreachable and stops
