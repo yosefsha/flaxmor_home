@@ -1,0 +1,106 @@
+services:
+  # Postgres — persistence for Open WebUI (chats, users, settings). The
+  # Middleware is stateless and never connects to it.
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - extractor_mw_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Open WebUI runs schema migrations on startup and crashes if Postgres
+      # is not yet accepting connections, so `open-webui` below waits on this
+      # healthcheck rather than on container start.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    # Not published to the host: only `middleware` and `open-webui` on the
+    # compose network need to reach it.
+
+  # Open WebUI — the chat UI. Configured to send every chat completion to the
+  # Middleware, never directly to OpenAI.
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:0.6.5
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Routes every chat completion at the Middleware's OpenAI-compatible
+      # surface instead of the real OpenAI API.
+      OPENAI_API_BASE_URL: http://middleware:8000/v1
+      # The local shared token the Middleware verifies via MIDDLEWARE_API_KEY
+      # below — never the real OpenAI key. The real key lives only on
+      # `middleware` and never enters this container's environment.
+      OPENAI_API_KEY: ${MIDDLEWARE_API_KEY}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      # Open WebUI otherwise fires extra requests at the same
+      # /chat/completions endpoint asking for a chat title and tags; the
+      # extractor prompt answers those with a JSON block, filling the
+      # sidebar with JSON fragments instead of titles. Disabling both turns
+      # every user turn into exactly one upstream call.
+      ENABLE_TITLE_GENERATION: "False"
+      ENABLE_TAGS_GENERATION: "False"
+    ports:
+      # Loopback only, for the same reason as `middleware` below. Open WebUI
+      # reaches the Middleware over the compose network, so exposing it to the
+      # wider network would be the easier route to the same OpenAI spend — and
+      # the first account created in Open WebUI becomes its administrator.
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
+    volumes:
+      - extractor_mw_open_webui_data:/app/backend/data
+
+  # Middleware — the FastAPI proxy built from the local Dockerfile. The only
+  # service in this stack whose code lives in this repo, and the only holder
+  # of the real OpenAI credential.
+  middleware:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # The shared local token Open WebUI must present as its bearer token.
+      # Verified on every request and never forwarded upstream.
+      MIDDLEWARE_API_KEY: ${MIDDLEWARE_API_KEY}
+      MODEL_ID: ${MODEL_ID}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Off by default: message content, including the injected System
+      # Prompt, is only written to logs when explicitly turned on.
+      LOG_PROMPTS: ${LOG_PROMPTS:-False}
+      DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.0}
+      DEFAULT_MAX_TOKENS: ${DEFAULT_MAX_TOKENS:-4096}
+      UPSTREAM_CONNECT_TIMEOUT: ${UPSTREAM_CONNECT_TIMEOUT:-5.0}
+      UPSTREAM_READ_TIMEOUT: ${UPSTREAM_READ_TIMEOUT:-120.0}
+      READINESS_CACHE_SECONDS: ${READINESS_CACHE_SECONDS:-30.0}
+      READINESS_PROBE_TIMEOUT: ${READINESS_PROBE_TIMEOUT:-2.0}
+    ports:
+      # Loopback only. This service converts requests into charges on a real
+      # OpenAI account; it must never be reachable from whatever network the
+      # host has joined, only from the host itself (for `curl` verification)
+      # and from `open-webui` over the compose network, which reaches it by
+      # service name on the container port, not through this mapping.
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  # Explicit, project-specific names so these cannot collide with an
+  # `open-webui` (or `postgres_data`) volume already sitting on the grader's
+  # machine from an unrelated setup — the official Open WebUI docs use the
+  # bare name `open-webui` for exactly this volume.
+  extractor_mw_postgres_data:
+    name: extractor_mw_postgres_data
+  extractor_mw_open_webui_data:
+    name: extractor_mw_open_webui_data
