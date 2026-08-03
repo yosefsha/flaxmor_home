@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+
+# Python environments / caches
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+.eggs
+
+# Tests — not needed at runtime, and pulling them in would bust image
+# layer caching on every test edit.
+tests/
+
+# Docs and project metadata — not needed by the running service.
+docs/
+README.md
+CONTEXT.md
+CLAUDE.md
+docs/adr/
+
+# Scripts unrelated to the running service.
+scripts/
+
+# Local tooling / IDE
+.claude/
+.vscode/
+.idea/
+*.log
+
+# Environment and secrets — never baked into the image.
+.env
+.env.*
+!.env.example
+
+# Compose / container files themselves — irrelevant inside the build context.
+docker-compose.yml
+Dockerfile
+.dockerignore
