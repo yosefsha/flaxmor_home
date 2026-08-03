@@ -1,0 +1,16 @@
+PROD_CONFIG = {
+    "environment": "prod",
+    "account": "REPLACE_WITH_AWS_ACCOUNT_ID",
+    "region": "us-east-1",
+    "service_name": "myapp",
+    "owner": "platform-team",
+    "domain_name": "example.com",
+    "frontend_domain": "app.example.com",
+    "backend_desired_count": 2,
+    "backend_min_tasks": 2,
+    "backend_max_tasks": 10,
+    "github_owner": "REPLACE_WITH_GITHUB_OWNER",
+    "github_repo": "REPLACE_WITH_GITHUB_REPO",
+    "github_branch": "main",
+    "codestar_connection_arn": "REPLACE_WITH_CODESTAR_CONNECTION_ARN",
+}
