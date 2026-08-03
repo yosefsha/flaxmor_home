@@ -96,11 +96,17 @@ services:
       start_period: 5s
 
 volumes:
-  # Explicit, project-specific names so these cannot collide with an
-  # `open-webui` (or `postgres_data`) volume already sitting on the grader's
-  # machine from an unrelated setup — the official Open WebUI docs use the
-  # bare name `open-webui` for exactly this volume.
+  # Distinctive keys so these cannot collide with an `open-webui` (or
+  # `postgres_data`) volume already on the machine from an unrelated setup —
+  # the official Open WebUI docs use the bare name `open-webui` for exactly
+  # this volume.
+  #
+  # Deliberately NOT pinned with `name:`. An explicit name is global rather
+  # than per-project, so a second checkout would silently share this Postgres
+  # data directory. Postgres applies POSTGRES_PASSWORD only when initialising
+  # an empty directory, so the second stack inherits the first one's password
+  # and Open WebUI crash-loops on "password authentication failed" — with the
+  # real error masked by an UnboundLocalError in its migration handler.
+  # Letting Compose prefix these with the project name keeps stacks isolated.
   extractor_mw_postgres_data:
-    name: extractor_mw_postgres_data
   extractor_mw_open_webui_data:
-    name: extractor_mw_open_webui_data
