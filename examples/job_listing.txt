@@ -1,0 +1,8 @@
+Senior Platform Engineer (Remote, EU only)
+Kestrel Analytics · Posted 3 days ago · 40 applicants
+
+We're hiring a platform engineer to own our Kubernetes estate.
+€85,000–€110,000 depending on experience. 4 days/week, Fridays off.
+Must have: 5+ yrs Linux, Terraform, one of AWS/GCP.
+Nice to have: Rust, observability tooling.
+No agencies.

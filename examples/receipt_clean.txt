@@ -1,0 +1,9 @@
+ACME CAFE
+114 Alder St, Portland OR
+Order #4471    2026-03-02    11:14
+
+1x Latte                3.50
+1x Croissant            4.25
+1x Catering tray       34.25
+TOTAL                  42.00
+Card ****4417  VISA

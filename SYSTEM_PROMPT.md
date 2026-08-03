@@ -28,9 +28,17 @@ Never mix modes in a single reply. Never explain which mode you chose.
 
 ## EXTRACTION MODE
 
-Respond with exactly one fenced code block, using the `json` language tag, containing
-exactly one JSON object. Output nothing before the opening fence and nothing after the
-closing fence — no greeting, no summary, no follow-up question.
+Respond with exactly one fenced code block containing exactly one JSON object. Output
+nothing before the opening fence and nothing after the closing fence — no greeting, no
+summary, no follow-up question.
+
+The opening fence must carry the language tag and read exactly:
+
+    ```json
+
+A bare ``` opening fence is wrong, even though the JSON inside it would be valid. The tag
+is how a reader locates the block, so it is required on every response without exception,
+including short documents and documents you found easy.
 
 The object always has exactly these four top-level keys:
 
@@ -250,6 +258,51 @@ names the rejected form (`total`, never `data.total`). Stating what *not* to wri
 part that had been missing — the original showed only positive examples, and neither
 disambiguated the root.
 
+#### Observed: the language tag was dropped on 2 of 8 documents
+
+The first run of `pytest -m live` failed on `receipt_smudged.txt` and
+`terse_invoice.txt`. Both returned a valid object inside a **bare** fence:
+
+```
+```
+{ "document_type": "invoice", ... }
+```
+
+The rule had read "exactly one fenced code block, using the `json` language tag" — a single
+clause carrying two requirements, with the tag as a subordinate aside. The model honoured
+the block and dropped the tag on a quarter of the documents, and notably on the shortest
+and the messiest, not the ones you would predict.
+
+That matters because the tag is how a reader locates the block. Anything scanning for
+```` ```json ```` silently finds nothing, and the failure looks like an empty response
+rather than a formatting slip.
+
+The rule was rewritten to give the tag its own paragraph, show the exact opening fence, and
+state the rejected form (`a bare ``` opening fence is wrong, even though the JSON inside it
+would be valid`), with an explicit "including short documents and documents you found easy"
+— since brevity was where compliance lapsed. All 8 documents complied on re-run.
+
+This is the same failure shape as the path-root ambiguity above: the prompt stated the
+requirement, but only positively, and only once. Both fixes were the same move — name the
+rejected form, and give the rule its own structural weight rather than burying it in a
+clause.
+
+#### Observed: flagging is not fully consistent between runs
+
+The `0.9` threshold was introduced on the reasoning that a stated boundary gives the model
+something to be consistent against. Running the same smudged receipt three times shows it
+helps but does not settle the matter: the illegible `TOTAL 11?.95` is usually flagged, and
+occasionally is not.
+
+So the eval asserts the property that actually matters instead of the one that sounded
+tidy. An unreadable value may be reported as `null`, omitted, or flagged — but never as a
+bare confident number. A missing flag is a degraded answer; an invented total is an
+unrecoverable one, because nothing downstream can tell it from a real reading. That
+invariant has held across every run.
+
+Making flagging deterministic would need a different mechanism than an instruction —
+per-field structured output, or a second pass whose only job is to audit the first.
+
 #### Reasoned, not yet observed
 
 Two rules were tightened during drafting on reasoning alone:
@@ -265,11 +318,33 @@ Two rules were tightened during drafting on reasoning alone:
   response for no distinct information, and one more field to hold the format together
   around.
 
+#### Verified by the live suite
+
+`pytest -m live` (38 assertions over the eight documents in `examples/`) now covers most of
+what this section previously listed as open:
+
+- **Mode Selection on a terse paste** — `INV-2024-8891 $4,200 net 30`, one line with no
+  verb, extracts rather than asking for clarification. The tie-break holds.
+- **A document ending in a question** still extracts; the presence of text to extract wins
+  over the presence of a question.
+- **Follow-up Mode stays prose** — asked "which figures were you least sure about?" with an
+  extraction in the history, the model answers in sentences with no fence and no
+  `document_type`, referencing the fields it flagged. The predicted failure of copying the
+  previous turn's shape did not occur.
+- **The envelope holds** across all eight documents: exactly four top-level keys, nothing
+  outside the fence, confidences in range, every `uncertain_fields` entry carrying a path
+  and a substantive reason.
+
 #### Still unverified
 
-One live run against one model on one document is evidence, not coverage. These remain
-predictions: Mode Selection on a terse paste, Follow-up Mode staying prose rather than
-re-emitting a block, format holding on a long document near the token limit, and whether
-the `0.9` threshold actually makes flagging consistent between runs. `tests/live/` (run
-with `pytest -m live`) exercises exactly those over a fixed document set; what it surfaces
-belongs in this section, with what changed in response.
+**Format on a long document near the token limit.** Every fixture here is short enough that
+truncation never came close. The failure mode this prompt worries about most — a JSON
+object cut off mid-structure, unparseable in a way truncated prose is not — remains
+untested, and would need a fixture deliberately sized against `DEFAULT_MAX_TOKENS`.
+
+**Behaviour on domain shorthand.** See the README's further-improvements section: given
+clinical abbreviations the model transcribed rather than expanded or flagged, and the
+prompt has no rule covering it. Not a regression, an absent requirement.
+
+**Anything beyond one model.** Everything here was observed on `gpt-4o-mini` at
+`temperature: 0`. The prompt has never been run against another model.
