@@ -158,21 +158,24 @@ Covered in `docs/design-decisions.md` ("The Extraction Block is emitted inside a
 `json` block"). Open WebUI renders markdown, so unfenced JSON reflows and loses
 indentation as it streams; a fence also matches the pattern most heavily represented in
 these models' training data, so it is the specification that fights the model's own habit
-the least. Requiring *exactly one* block with *nothing outside it* was added after
-noticing that without that constraint, verbose completions tend to add a summary sentence
-either before or after the block ("Here's what I extracted:" / "Let me know if..."),
-which breaks any caller that expects to find the object by grabbing the first and only
-fenced block in the reply.
+the least. The stricter requirement — *exactly one* block, *nothing outside it* — guards
+against the failure this rule most plausibly invites: a conversational model wrapping the
+block in a summary sentence ("Here's what I extracted:" / "Let me know if..."), which
+breaks any reader expecting the reply to be the object and nothing else. Saying "one
+block, nothing around it" costs a sentence and removes the ambiguity.
 
 ### Why FOLLOW-UP MODE is prose-only, explicitly
 
-Early drafts of this prompt specified Extraction Mode in detail and left Follow-up Mode
-as "otherwise, just answer normally." In testing that phrasing, the model would sometimes
-re-emit a JSON block anyway when a follow-up question touched on a specific field (e.g.
-"what was the total again?"), apparently pattern-matching the previous turn's shape
-rather than switching modes. Making the no-fence, no-JSON, prose-and-reference-by-name
-rule explicit and structurally parallel to the Extraction Mode rules (its own named
-section, its own formatting rule) fixed this in later iterations.
+An earlier version of this section left Follow-up Mode as "otherwise, answer normally" and
+spent its detail on Extraction Mode. That asymmetry is a risk rather than an economy: a
+model that has just produced a JSON block, asked a question about that block, has an
+obvious pattern to copy, and "answer normally" is weak instruction against it. Making the
+rule explicit and structurally parallel to Extraction Mode — its own named section, its own
+formatting rule, an instruction to name the fields it references — gives the model
+something concrete to follow instead of an absence.
+
+This is a prediction about model behaviour, not an observation; the live evals described
+below are what will confirm or refute it.
 
 ### Edge cases considered
 
@@ -208,18 +211,30 @@ section, its own formatting rule) fixed this in later iterations.
   Middleware honours explicit client values rather than silently discarding them, so the
   prompt is honest about what it can promise when a client opts out of the defaults.
 
-### What was iterated on
+### Status: this is a first draft, and what would change it
 
-The first draft of the uncertainty rule asked the model to flag "any field you're not
-sure about," which produced wildly inconsistent output between otherwise-similar
-documents — the same kind of receipt total would sometimes get flagged, sometimes not,
-with no stated boundary to be consistent against. Pinning an explicit numeric threshold
-(`below 0.9`) and stating that unflagged fields are an implicit confidence claim removed
-that variance.
+**No claim below is based on observed model output.** This prompt was written from the
+design reasoning above and committed without having been run against a model. Recording
+that plainly matters more than an impressive-sounding history: every rule here is a
+prediction about how a model will behave, and predictions are worth exactly what the
+evidence behind them is worth.
 
-The first draft of the envelope also included a top-level `summary` string, dropped after
-recognizing it duplicated `data` in prose form for no reader who wasn't better served by
-just reading `data` directly — it existed only because early drafts weren't confident the
-`data` object alone would communicate the result clearly enough. Once `document_type` and
-a well-shaped `data` were made mandatory, the summary field was redundant weight on every
-response and was removed.
+Two rules were tightened during drafting, on reasoning rather than evidence:
+
+- **The uncertainty rule originally said "flag any field you're not sure about."** With no
+  stated boundary the model has nothing to be consistent *against*, so the same receipt
+  total could plausibly be flagged in one run and not the next. The explicit `below 0.9`
+  threshold, plus the statement that unflagged fields are an implicit confidence claim,
+  gives the judgment a fixed reference point. Whether it actually removes the variance is
+  the open question.
+- **The envelope briefly carried a top-level `summary` string**, dropped on the reasoning
+  that it restates `data` in prose for a reader who can read `data` — weight on every
+  response for no distinct information, and one more field to hold the format together
+  around.
+
+**How this section gets replaced.** `tests/live/` (run with `pytest -m live`) exercises the
+prompt against the real model over a fixed set of documents, asserting structure on every
+fixture and exact values on deliberately unambiguous ones. When that suite has run, the
+specific failures it surfaces — mode misclassification on terse pastes, format drift on
+long documents, inconsistent flagging — belong here, with what changed in response. Until
+then this section states what is predicted and what is not yet known.
