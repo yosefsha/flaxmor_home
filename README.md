@@ -185,6 +185,57 @@ is reported by exception — is in **[docs/design-decisions.md](docs/design-deci
   no persistence.
 - **[CONTEXT.md](CONTEXT.md)** — glossary of the domain terms used throughout.
 
+## Further improvements
+
+In rough order of value. The first two are known weaknesses rather than speculative
+polish — both were found by running the stack, and neither is fixed.
+
+**1. The prompt has no rule for domain shorthand.** Given a clinical note containing
+`3/52 hx ... r/v 2/52`, the model copied the shorthand verbatim into `data` and reported
+`uncertain_fields: []`. It neither expanded `3/52` to *three weeks* nor flagged that it
+hadn't. It also dropped the `?` from `?renal calculus`, turning a suspected diagnosis into
+a stated one, at `document_type_confidence: 0.95`. So on unfamiliar jargon the extractor
+degrades quietly into a transcriber, behind a clean-looking envelope. The prompt needs an
+explicit rule — expand, preserve, or flag — and the third option matters most: not
+understanding a token is exactly the condition `uncertain_fields` exists to report.
+
+**2. Live prompt evaluations are specified but not built.** `SYSTEM_PROMPT.md` lists four
+behaviours as predicted-not-observed: Mode Selection on a terse paste, Follow-up Mode
+staying prose rather than re-emitting a block, format holding on a long document near the
+token limit, and whether the stated `0.9` threshold actually makes flagging consistent
+between runs. The intended shape is a `pytest -m live` suite over `examples/`, asserting
+structure on every document and exact values on the unambiguous ones, skipping when no key
+is present. One manual run against one model on one document is evidence, not coverage.
+
+**3. `/v1/models` could proxy OpenAI's real catalogue.** It currently returns a single
+configured id, which keeps the model dropdown working when OpenAI is unreachable and stops
+users selecting a model the prompt was never tuned against — notably the reasoning models,
+whose `system` role handling differs. A configurable source behind the existing catalog
+seam would allow the real list where that trade-off is wanted; the seam is already in
+place (`app/ports.py: ModelCatalog`).
+
+**4. Response content is never logged, only the request.** `LOG_PROMPTS` shows the
+outgoing payload, which is what prompt iteration needs, but the model's reply is forwarded
+frame by frame and never assembled, so there is nothing to log. Capturing it would mean
+accumulating the stream in memory — affordable for debugging, wrong as a default. It
+belongs behind its own flag, not this one.
+
+**5. A dead seam remains.** `attach_completion_fields()` in `app/request_logging.py` was
+built so the upstream layer could enrich `request.completed`; the upstream layer emits its
+own `upstream.stream_completed` event instead. Both correlate by `request_id`, so nothing
+is broken, but one of the two should go.
+
+**6. Readiness misclassifies an empty credential.** With `OPENAI_API_KEY` unset the probe
+fails inside the HTTP client rather than at OpenAI, and is classified `transient` rather
+than `permanent`. The overall verdict stays correct — the config check catches it — but
+`last_probe` reports a confusing transport error instead of "no credential configured".
+
+**7. Authentication is a single shared token.** Appropriate for a local single-user stack,
+and it is what stops the service being an open relay to a paid API. Anything multi-tenant
+would need per-caller credentials and per-caller rate limiting, which would also change
+where the OpenAI key lives — see
+[ADR-001](docs/adr/ADR-001-stateless-middleware.md) for why that boundary is drawn as it is.
+
 ## Layout
 
 ```
