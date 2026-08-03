@@ -86,6 +86,33 @@ async def test_system_prompt_is_prepended_to_messages() -> None:
     assert messages[1] == {"role": "user", "content": "hi"}
 
 
+async def test_payload_content_is_logged_only_when_log_prompts_is_on(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """LOG_PROMPTS is worthless unless something calls the gated logger. This
+    asserts the call site exists, since the flag was shipped once with no
+    caller and silently did nothing."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "x", "choices": []}, request=request)
+
+    body = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
+
+    with caplog.at_level("INFO"):
+        await _client(handler, log_prompts=False).chat_completion(dict(body))
+    assert not [r for r in caplog.records if getattr(r, "event", "") == "upstream.request_payload"]
+
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        await _client(handler, log_prompts=True).chat_completion(dict(body))
+
+    logged = [r for r in caplog.records if getattr(r, "event", "") == "upstream.request_payload"]
+    assert len(logged) == 1
+    messages = logged[0].messages  # type: ignore[attr-defined]
+    assert messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert messages[1] == {"role": "user", "content": "hi"}
+
+
 async def test_client_system_messages_are_discarded() -> None:
     """A user can set a system prompt in Open WebUI's model settings. It would
     arrive after ours, where later instructions tend to win, so it is dropped

@@ -59,10 +59,11 @@ not pad it, and do not restate confident fields there.
 
 Each entry is an object with exactly three keys:
 
-- `path` (string) — the location of the field within `data`, using this convention:
-  dot-separated keys for nesting, and `name[index]` (zero-based) for array elements.
-  Example: `line_items[2].amount` refers to the `amount` field of the third element of
-  the `line_items` array. `patient.date_of_birth` refers to a nested object field.
+- `path` (string) — the location of the field, written **relative to `data`**. Do not
+  include a `data.` prefix: the path to `data.total` is written `total`, never
+  `data.total`. Use dot-separated keys for nesting and `name[index]` (zero-based) for
+  array elements. So: `total`, `line_items[2].amount` for the `amount` of the third
+  line item, `patient.date_of_birth` for a nested object field.
 - `confidence` (number, 0 to 1) — your actual confidence in that specific value.
 - `reason` (string) — a short, plain-language explanation of the doubt, specific enough
   that a person knows what to check. Write what is uncertain and why, e.g. `"smudged
@@ -152,6 +153,11 @@ stated. JSON Pointer is precise but was rejected here since nothing downstream a
 resolves the pointer programmatically — the reader is a person, and dotted paths are what
 most people already reach for.
 
+The notation survived first contact; the *root* did not. See the observed-behaviour note
+below — the original wording said paths give "the location of the field within `data`"
+without settling whether the `data.` prefix belongs, and the model supplied it. The rule
+now states the answer explicitly and shows the rejected form.
+
 ### Why the fenced block is required, and why exactly one
 
 Covered in `docs/design-decisions.md` ("The Extraction Block is emitted inside a fenced
@@ -211,15 +217,42 @@ below are what will confirm or refute it.
   Middleware honours explicit client values rather than silently discarding them, so the
   prompt is honest about what it can promise when a client opts out of the defaults.
 
-### Status: this is a first draft, and what would change it
+### What was iterated on
 
-**No claim below is based on observed model output.** This prompt was written from the
-design reasoning above and committed without having been run against a model. Recording
-that plainly matters more than an impressive-sounding history: every rule here is a
-prediction about how a model will behave, and predictions are worth exactly what the
-evidence behind them is worth.
+Each entry says whether it came from reasoning or from watching the model, because those
+are worth different amounts.
 
-Two rules were tightened during drafting, on reasoning rather than evidence:
+#### Observed: the path root was ambiguous (gpt-4o-mini, first live run)
+
+A receipt with two deliberately illegible figures — `Tax 9.7?` and `TOTAL 11?.95` — was
+sent through the Middleware. The envelope held exactly: one fenced `json` block with
+nothing outside it, all four top-level keys, both unreadable values extracted as `null`
+rather than guessed, and both flagged with reasons naming the illegible text
+(`"tax amount is unclear; appears to be '9.7?'"`). 361 SSE frames, 1.28s to first token.
+
+The failure was in the paths:
+
+```json
+"uncertain_fields": [
+  {"path": "data.tax",   "confidence": 0.5, "reason": "..."},
+  {"path": "data.total", "confidence": 0.5, "reason": "..."}
+]
+```
+
+The rule said paths give "the location of the field within `data`" and illustrated only a
+nested case, `line_items[2].amount`. Nothing settled whether the `data.` prefix belonged,
+and both readings are defensible — so the model picked one, and a different run or a
+different model could pick the other. An ambiguous convention is not a convention: anything
+resolving these paths against `data` breaks on the prefix.
+
+The rule now states the root explicitly, shows a flat example alongside the nested one, and
+names the rejected form (`total`, never `data.total`). Stating what *not* to write was the
+part that had been missing — the original showed only positive examples, and neither
+disambiguated the root.
+
+#### Reasoned, not yet observed
+
+Two rules were tightened during drafting on reasoning alone:
 
 - **The uncertainty rule originally said "flag any field you're not sure about."** With no
   stated boundary the model has nothing to be consistent *against*, so the same receipt
@@ -232,9 +265,11 @@ Two rules were tightened during drafting, on reasoning rather than evidence:
   response for no distinct information, and one more field to hold the format together
   around.
 
-**How this section gets replaced.** `tests/live/` (run with `pytest -m live`) exercises the
-prompt against the real model over a fixed set of documents, asserting structure on every
-fixture and exact values on deliberately unambiguous ones. When that suite has run, the
-specific failures it surfaces — mode misclassification on terse pastes, format drift on
-long documents, inconsistent flagging — belong here, with what changed in response. Until
-then this section states what is predicted and what is not yet known.
+#### Still unverified
+
+One live run against one model on one document is evidence, not coverage. These remain
+predictions: Mode Selection on a terse paste, Follow-up Mode staying prose rather than
+re-emitting a block, format holding on a long document near the token limit, and whether
+the `0.9` threshold actually makes flagging consistent between runs. `tests/live/` (run
+with `pytest -m live`) exercises exactly those over a fixed document set; what it surfaces
+belongs in this section, with what changed in response.

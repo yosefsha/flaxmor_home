@@ -23,6 +23,7 @@ import httpx
 from app.config import Settings
 from app.errors import UpstreamError
 from app.ports import ProbeResult, PromptSource
+from app.request_logging import log_message_content
 from app.streaming import SseStreamObserver
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,20 @@ class OpenAiUpstreamClient:
         prepared["stream"] = streaming
         if streaming:
             prepared["stream_options"] = {"include_usage": True}
+
+        # The only place the fully-assembled payload exists: the injected
+        # System Prompt alongside the user's document, exactly as the Upstream
+        # will see it. That is the view worth having when iterating on the
+        # prompt, so it is the call site for content logging -- gated inside
+        # ``log_message_content`` by ``LOG_PROMPTS``, which is false by default.
+        log_message_content(
+            logger,
+            "upstream.request_payload",
+            "outgoing upstream payload",
+            settings=self._settings,
+            model=prepared.get("model"),
+            messages=prepared["messages"],
+        )
 
         return prepared
 
