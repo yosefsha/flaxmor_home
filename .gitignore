@@ -6,3 +6,9 @@ cdk.out/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Secrets. `.env` holds a real OpenAI key; `.env.example` is the tracked
+# template and is deliberately re-included.
+.env
+.env.*
+!.env.example
