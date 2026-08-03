@@ -113,6 +113,29 @@ async def test_payload_content_is_logged_only_when_log_prompts_is_on(
     assert messages[1] == {"role": "user", "content": "hi"}
 
 
+@pytest.mark.parametrize("header", ["inf", "-inf", "nan", "NaN", "Infinity"])
+async def test_non_finite_retry_after_is_ignored(header: str) -> None:
+    """`float()` accepts "inf" and "nan". Either would survive into
+    `int(retry_after)` in the error handler and raise there, turning a 429 the
+    caller could act on into an opaque 500."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": {"message": "slow down"}},
+            headers={"Retry-After": header},
+            request=request,
+        )
+
+    with pytest.raises(UpstreamError) as caught:
+        await _client(handler).chat_completion(
+            {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
+        )
+
+    assert caught.value.status_code == 429
+    assert caught.value.retry_after is None
+
+
 async def test_client_system_messages_are_discarded() -> None:
     """A user can set a system prompt in Open WebUI's model settings. It would
     arrive after ours, where later instructions tend to win, so it is dropped

@@ -7,6 +7,7 @@ streaming — against a fake Upstream. No network, no API key, no prompt file.
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,7 @@ from app.errors import UpstreamError
 from app.main import create_app
 from app.models import ModelList, ModelObject
 from app.ports import ProbeResult
+from app.upstream import OpenAiUpstreamClient
 from tests.conftest import make_settings
 
 SYSTEM_PROMPT = "You are a structured data extractor."
@@ -231,6 +233,95 @@ def test_non_streaming_upstream_failure_is_rendered_in_the_envelope() -> None:
     assert response.status_code == 502
     assert response.json()["error"]["type"] == "upstream_error"
     assert "Retry-After" not in response.headers
+
+
+def test_completion_details_reach_the_request_completed_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`request.completed` must carry the outcome, not leave a reader joining
+    two log lines by request id. `attach_completion_fields` existed for this
+    and had no production caller."""
+    body = (
+        b'data: {"choices":[{"delta":{"content":"{"},"finish_reason":null}]}\n\n'
+        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        b'data: {"choices":[],"usage":{"total_tokens":41}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
+    class _Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):  # type: ignore[override]
+            yield body
+
+    def transport_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=_Stream(),
+            request=request,
+        )
+
+    settings = make_settings(middleware_api_key=TOKEN)
+    # The real client, so SseStreamObserver actually runs — a fake upstream
+    # would bypass the very code under test.
+    upstream = OpenAiUpstreamClient(
+        settings, SYSTEM_PROMPT, transport=httpx.MockTransport(transport_handler)
+    )
+    app = create_app(
+        settings,
+        prompt_source=FakePromptSource(),
+        upstream_client=upstream,
+        catalog=FakeCatalog(),
+    )
+
+    with caplog.at_level("INFO"):
+        with TestClient(app) as client:
+            client.post(
+                "/v1/chat/completions",
+                headers=_auth(),
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+
+    completed = [r for r in caplog.records if getattr(r, "event", "") == "request.completed"]
+    assert len(completed) == 1
+    assert completed[0].finish_reason == "stop"  # type: ignore[attr-defined]
+    assert completed[0].usage == {"total_tokens": 41}  # type: ignore[attr-defined]
+
+
+def test_upstream_events_are_named_in_the_event_field() -> None:
+    """Event names belong in `event`, not in the human-readable message: the
+    formatter defaults `event` to "log", so a name passed as the message is
+    unqueryable."""
+    from app.streaming import SseStreamObserver
+
+    import asyncio
+
+    async def drive() -> None:
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+
+        async for _ in SseStreamObserver().observe(chunks()):
+            pass
+
+    import logging
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logging.getLogger("app.streaming").addHandler(handler)
+    try:
+        asyncio.run(drive())
+    finally:
+        logging.getLogger("app.streaming").removeHandler(handler)
+
+    assert any(getattr(r, "event", None) == "upstream.stream_completed" for r in records)
 
 
 # --- readiness -------------------------------------------------------------
