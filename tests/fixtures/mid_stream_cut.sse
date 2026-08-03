@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl-cut1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-cut1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"```json\n{\"document_type\": \"rece"},"finish_reason":null}]}
+

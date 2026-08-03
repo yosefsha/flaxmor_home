@@ -1,0 +1,12 @@
+: keepalive
+
+data: {"id":"chatcmpl-keepalive1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+: keepalive
+
+data: {"id":"chatcmpl-keepalive1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-keepalive1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[],"usage":{"prompt_tokens":50,"completion_tokens":5,"total_tokens":55}}
+
+data: [DONE]
+
