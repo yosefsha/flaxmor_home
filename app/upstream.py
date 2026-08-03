@@ -133,9 +133,26 @@ class OpenAiUpstreamClient:
     ) -> dict[str, Any]:
         prepared = dict(payload)
         messages = list(prepared.get("messages") or [])
+
+        # Any system message the client sent is discarded rather than kept
+        # alongside ours. Open WebUI lets a user set a system prompt in its
+        # model settings, and it would arrive after this one, where later
+        # instructions tend to win -- "always reply in one sentence" would
+        # quietly dismantle the Extraction Block contract with no signal that
+        # anything had changed. The Middleware makes exactly one promise about
+        # its output, so it does not forward the one input that can silently
+        # break it.
+        client_system_messages = [m for m in messages if m.get("role") == "system"]
+        if client_system_messages:
+            logger.warning(
+                "discarded %d client system message(s); the Middleware's System "
+                "Prompt is the only system instruction sent upstream",
+                len(client_system_messages),
+            )
+
         prepared["messages"] = [
             {"role": "system", "content": self._system_prompt},
-            *messages,
+            *(m for m in messages if m.get("role") != "system"),
         ]
 
         temperature = prepared.get("temperature")
