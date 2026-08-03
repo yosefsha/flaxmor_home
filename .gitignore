@@ -2,7 +2,6 @@ compact-transcript-export.log
 __pycache__/
 .DS_Store
 .venv/
-cdk.out/
 
 # Agent worktrees
 .claude/worktrees/
