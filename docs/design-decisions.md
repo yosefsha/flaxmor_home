@@ -273,6 +273,29 @@ Open WebUI runs schema migrations at startup and will crash against a database t
 yet accepting connections, so `depends_on` waits on a `pg_isready` healthcheck rather than
 on container start.
 
+## A client's own system message is discarded, not merged
+
+Open WebUI lets a user set a system prompt in its model settings, and sends it inside
+`messages`. It therefore arrives *after* the injected System Prompt, and later instructions
+tend to win: "always reply in one sentence" is enough to dismantle the Extraction Block
+contract, with nothing in the output to indicate why it stopped being JSON.
+
+The Middleware makes exactly one promise about its output, so it does not forward the one
+input that can silently break it. Client system messages are dropped and the discard is
+logged at warning level, making the behaviour visible rather than mysterious.
+
+Keeping both was rejected because the resulting failure is silent and the guarantee becomes
+conditional on the caller not contradicting it. Merging the client's text into a
+subordinate section of our own system message was rejected as a hope rather than a
+guarantee — the model may still follow appended text that conflicts with the rules above
+it. The cost is that a user who sets a system prompt in Open WebUI finds it ignored, which
+the README states plainly.
+
+Note this differs from sampling parameters, which *are* honoured when set explicitly. The
+distinction is that a temperature is a knob the OpenAI-compatible surface advertises and a
+caller may legitimately turn, while a second system message is a direct contradiction of
+the service's only stated contract.
+
 ## Sampling parameters are defaulted, not overridden
 
 Two client parameters can break the format guarantee: a high `temperature` degrades format
