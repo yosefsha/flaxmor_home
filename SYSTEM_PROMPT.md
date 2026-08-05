@@ -24,6 +24,15 @@ message; that is still an extraction.
 - If it is genuinely ambiguous which applies, choose EXTRACTION MODE. A short or terse
   paste is still a document; treat it as one rather than asking for clarification.
 
+Your own earlier replies are not evidence about which mode this turn calls for. Decide
+each turn from the latest user message alone, as if you had chosen no mode before.
+
+That your previous reply was an Extraction Block is not a reason to produce another one.
+A question about data you already extracted is FOLLOW-UP MODE even when every reply so far
+in this conversation has been an Extraction Block, and even when your immediately preceding
+reply was an Extraction Block that should have been prose. Repeating a mistaken choice does
+not make it right.
+
 Never mix modes in a single reply. Never explain which mode you chose.
 
 ## EXTRACTION MODE
@@ -303,6 +312,34 @@ invariant has held across every run.
 Making flagging deterministic would need a different mechanism than an instruction —
 per-field structured output, or a second pass whose only job is to audit the first.
 
+#### Observed: a mis-classified turn made every later turn mis-classify
+
+Found in the running stack, not the eval suite. Once the model answered a follow-up
+question with an Extraction Block instead of prose, it kept doing so — every subsequent
+question in that conversation came back as JSON, and the conversation never recovered.
+
+The mechanism is the conversation history the Middleware forwards unchanged
+(`app/upstream.py`). On the turn after the miss, the model sees the mode rule once at
+position 0, hundreds of tokens back, and a concrete assistant turn demonstrating the
+wrong mode immediately beside the new user message. Recency and pattern-imitation both
+favour the second, so the mistake stops being an error and becomes an in-context example
+of how this assistant answers here. Each repetition adds another example, which is why it
+compounds instead of decaying.
+
+The prompt had anticipated the neighbouring failure and not this one. Mode Selection
+already said to decide "based only on the content of the user's latest message — never on
+where it falls in the conversation," which rules out *position* as a signal but says
+nothing about the model's own previous replies, the stronger anchor of the two. The rule
+now names them and states that a mode used earlier carries no weight, correctly chosen or
+not.
+
+Same shape as the two failures above, one level up: the rule was stated positively and the
+rejected behaviour was left unnamed. The fix was the same move for the third time.
+
+`test_a_follow_up_stays_prose_after_a_mis_classified_turn` seeds the mis-classified
+assistant turn directly, so the regression is reproducible without waiting for the model
+to make the mistake on its own.
+
 #### Reasoned, not yet observed
 
 Two rules were tightened during drafting on reasoning alone:
@@ -330,7 +367,9 @@ what this section previously listed as open:
 - **Follow-up Mode stays prose** — asked "which figures were you least sure about?" with an
   extraction in the history, the model answers in sentences with no fence and no
   `document_type`, referencing the fields it flagged. The predicted failure of copying the
-  previous turn's shape did not occur.
+  previous turn's shape did not occur *from a correctly-classified previous turn*. It does
+  occur from an incorrectly-classified one, which this test did not cover and the running
+  stack found — see the observed note above.
 - **The envelope holds** across all eight documents: exactly four top-level keys, nothing
   outside the fence, confidences in range, every `uncertain_fields` entry carrying a path
   and a substantive reason.

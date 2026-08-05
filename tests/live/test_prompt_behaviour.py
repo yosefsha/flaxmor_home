@@ -162,6 +162,41 @@ def test_a_follow_up_question_is_answered_in_prose() -> None:
     assert "total" in reply.lower() or "tax" in reply.lower()
 
 
+def test_a_follow_up_stays_prose_after_a_mis_classified_turn() -> None:
+    """The ratchet: a wrong mode choice does not stay contained to its own turn.
+
+    It sits in the history as a concrete example of how this assistant answers
+    a question, adjacent to the next user message, while the mode rule is
+    hundreds of tokens away at position 0. Left unaddressed, one mis-classified
+    follow-up makes every later follow-up an Extraction Block too, so the
+    conversation never recovers. The assistant turn below is seeded
+    deliberately: it is the failure, replayed as the model would see it.
+    """
+    mis_classified = (
+        "```json\n"
+        '{"document_type": "receipt", "document_type_confidence": 0.95, '
+        '"data": {"least_certain_fields": ["tax", "total"]}, '
+        '"uncertain_fields": []}\n'
+        "```"
+    )
+    reply = complete(
+        [
+            {"role": "user", "content": document("receipt_smudged.txt")},
+            {"role": "assistant", "content": extract("receipt_smudged.txt")},
+            {"role": "user", "content": "which figures were you least sure about?"},
+            {"role": "assistant", "content": mis_classified},
+            {"role": "user", "content": "and what subtotal did you read?"},
+        ]
+    )
+
+    assert "```" not in reply, (
+        f"follow-up copied the previous turn's mis-classified block: {reply[:200]!r}"
+    )
+    assert "document_type" not in reply
+    assert len(reply.split()) > 5, "follow-up answer was not prose"
+    assert "108" in reply, f"the subtotal was not answered: {reply[:200]!r}"
+
+
 # --- consistency ------------------------------------------------------------
 
 
